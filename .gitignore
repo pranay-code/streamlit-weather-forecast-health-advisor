@@ -43,5 +43,5 @@ venv.bak/
 # Mac
 .DS_Store
 
-# Testing Code
-Testing.ipynb/
+# Jupyter Notebooks
+*.ipynb
