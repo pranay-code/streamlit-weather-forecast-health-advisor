@@ -49,15 +49,15 @@ def save_sites(sites_data):
 # --- Helper Functions for Data Fetching & Processing ---
 
 @st.cache_data(ttl=3600)
-def fetch_forecast_data(latitude, longitude):
+def fetch_forecast_data(latitude, longitude, forecast_days=3):
     """Fetches weather and air quality data for the next 3 days (72 hours)."""
     try:
-        weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m,relativehumidity_2m,rain,windspeed_10m&forecast_days=3"
+        weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m,relativehumidity_2m,rain,windspeed_10m&forecast_days={forecast_days}"
         weather_response = requests.get(weather_url)
         weather_response.raise_for_status()
         weather_data = weather_response.json()
 
-        aqi_url = f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={latitude}&longitude={longitude}&hourly=us_aqi&forecast_days=3"
+        aqi_url = f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={latitude}&longitude={longitude}&hourly=us_aqi&forecast_days={forecast_days}"
         aqi_response = requests.get(aqi_url)
         aqi_response.raise_for_status()
         aqi_data = aqi_response.json()
@@ -119,11 +119,11 @@ if 'edit_mode' not in st.session_state: st.session_state.edit_mode = False
 site_options = list(st.session_state.sites.keys())
 
 # --- Layout: Two Columns ---
-col1,vcol, col2 = st.columns([0.47,0.06, 0.47])
+col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📍 City Selection")
-    selected_site = st.selectbox("Choose an existing site", site_options, key="site_selector",index=len(site_options)-1)
+    st.subheader("📍 Location Selection")
+    selected_site = st.selectbox("Choose an location", site_options, key="site_selector",index=len(site_options)-1)
 
     site_info = st.session_state.sites[selected_site]
     lat = site_info["latitude"]
@@ -140,15 +140,17 @@ with col1:
                 st.success("Coordinates updated!"); st.session_state.edit_mode = False; st.rerun()
             except ValueError: st.error("Invalid coordinates.")
     else:
-        if st.button("Edit Coordinates"): st.session_state.edit_mode = True; st.rerun()
+        if st.button("Edit Coordinates"):
+            st.session_state.edit_mode = True
+            st.rerun()
 
     # Correction 2: Move "Add New Site" to be after the edit button
-    with st.expander("Add New Site"):
+    with st.expander("Add New Location"):
         with st.form("new_site_form", clear_on_submit=True):
-            new_site_name = st.text_input("Site Name")
+            new_site_name = st.text_input("Location Name")
             new_lat = st.text_input("Latitude")
             new_lon = st.text_input("Longitude")
-            if st.form_submit_button("Add Site"):
+            if st.form_submit_button("Add Location"):
                 if new_site_name and new_lat and new_lon:
                     try:
                         # Correction 1: Add to session state, not file
@@ -156,16 +158,6 @@ with col1:
                         st.success(f"Site '{new_site_name}' added for this session!"); st.rerun()
                     except ValueError: st.error("Please enter valid numeric coordinates.")
 
-with vcol:
-    # Correction 6: Add vertical line using CSS
-    st.markdown("""
-                <div style='
-                    height: 650px; /* Custom height */
-                    width: 3px;    /* Custom width */
-                    background-color: #e65100; /* Custom color */
-                    margin: auto; /* Vertically center the line */
-                '></div>
-                """, unsafe_allow_html=True)
 
 with col2:
     st.subheader("🗺️ Map View")
@@ -175,9 +167,12 @@ with col2:
 # Use thicker horizontal lines
 st.markdown("<hr style='height:3px;border-width:0;color:#e65100;background-color:#e65100'>", unsafe_allow_html=True)
 
-if selected_site != "Select a site":
+selected_forecast_horizon = st.selectbox("Choose forecast horizon (in days)", [2,3,4,5,6], key="horizon_selector",index=0)
+
+if selected_site != "Select a location":    
+
     with st.spinner(f"Fetching data for {selected_site}..."):
-        weather_data, aqi_data = fetch_forecast_data(lat, lon)
+        weather_data, aqi_data = fetch_forecast_data(lat, lon,forecast_days=selected_forecast_horizon)
     if weather_data and aqi_data:
         hourly_df, summary_df = process_data(weather_data, aqi_data)
         st.header("☀️ Weather Forecast")
@@ -189,10 +184,10 @@ if selected_site != "Select a site":
             display_summary['AQI Range'] = display_summary.apply(lambda r: f"{r['AQI_min']:.0f} - {r['AQI_max']:.0f}", axis=1)
             display_summary['Avg. Wind (km/h)'] = display_summary['Wind (km/h)_mean'].map('{:.1f}'.format)
             st.dataframe(display_summary[['Temp Range (°C)', 'Humidity Range (%)', 'AQI Range', 'Avg. Wind (km/h)']], use_container_width=True)
-            st.download_button("📥 Download Summary", convert_df_to_csv(summary_df), "summary_forecast.csv", "text/csv")
+            st.download_button("📥 Download Summary", convert_df_to_csv(summary_df), f"{selected_site}_summary_forecast.csv", "text/csv")
         else:
             st.dataframe(hourly_df, use_container_width=True)
-            st.download_button("📥 Download Hourly Forecast", convert_df_to_csv(hourly_df), "hourly_forecast.csv", "text/csv")
+            st.download_button("📥 Download Hourly Forecast", convert_df_to_csv(hourly_df), f"{selected_site}_hourly_forecast.csv", "text/csv")
 
         # Use thicker horizontal lines
         st.markdown("<hr style='height:3px;border-width:0;color:#e65100;background-color:#e65100'>", unsafe_allow_html=True)
@@ -218,7 +213,7 @@ if selected_site != "Select a site":
                 rec_data["Adults"].append(rec.get('recommendations', {}).get('adults', 'N/A'))
             rec_df = pd.DataFrame(rec_data, index=index_dates)
             st.dataframe(rec_df, use_container_width=True)
-            st.download_button("📥 Download Recommendations", convert_df_to_csv(rec_df), "health_recommendations.csv", "text/csv")
+            st.download_button("📥 Download Recommendations", convert_df_to_csv(rec_df), f"{selected_site}_health_recommendations.csv", "text/csv")
         else:
             st.warning("Could not generate health recommendations.")
 else:
